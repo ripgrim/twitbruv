@@ -45,8 +45,9 @@ export async function publishDueScheduledPosts(db: Database, batchSize = 25): Pr
 async function publishOne(db: Database, authorId: string, scheduledId: string): Promise<boolean> {
   return await db.transaction(async (tx) => {
     // SKIP LOCKED: if another worker already holds this row, bail — we'll see it next scan
-    // if it's still due. The eligibility filters are re-checked under the lock to handle the
-    // case where it was published or failed between the outer scan and now.
+    // if it's still due. Eligibility is fully re-checked under the lock (including the
+    // scheduledFor cutoff) to handle the case where the user edited the row between the
+    // outer scan and now — e.g. pushed the time into the future or saved it back as a draft.
     const [draft] = await tx
       .select()
       .from(schema.scheduledPosts)
@@ -54,6 +55,8 @@ async function publishOne(db: Database, authorId: string, scheduledId: string): 
         and(
           eq(schema.scheduledPosts.id, scheduledId),
           eq(schema.scheduledPosts.authorId, authorId),
+          isNotNull(schema.scheduledPosts.scheduledFor),
+          lte(schema.scheduledPosts.scheduledFor, new Date()),
           isNull(schema.scheduledPosts.publishedAt),
           isNull(schema.scheduledPosts.failedAt),
         ),
